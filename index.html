@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bol – Text to Indian-accent speech</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Hind:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#EAF3F1; --panel:#FFFFFF; --ink:#0F3B3A; --muted:#4E7371; --line:#B9D3CF; --accent:#D98A12; --accent-ink:#1B1303;
+  box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ color-scheme:dark; --bg:#0F3B3A; --panel:#0B2E2D; --ink:#F3EEDF; --muted:#9FC2BE; --line:#2B5C59; --accent:#F2A93B; --accent-ink:#1B1303; }
+}
+:root[data-theme="dark"]{ color-scheme:dark; --bg:#0F3B3A; --panel:#0B2E2D; --ink:#F3EEDF; --muted:#9FC2BE; --line:#2B5C59; --accent:#F2A93B; --accent-ink:#1B1303; }
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Hind",system-ui,sans-serif;font-size:17px;line-height:1.5}
+main{max-width:720px;margin:0 auto;padding:40px 20px 56px}
+h1{font-family:"Bricolage Grotesque",system-ui,sans-serif;font-weight:800;font-size:clamp(40px,9vw,72px);line-height:1;margin:0 0 10px;letter-spacing:-.02em}
+.sub{color:var(--muted);margin:0 0 28px;max-width:52ch}
+textarea{width:100%;min-height:220px;resize:vertical;padding:16px;border:1.5px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:inherit;line-height:1.6}
+textarea:focus,select:focus,button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.count{color:var(--muted);font-size:14px;margin:6px 2px 20px;text-align:right}
+.row{display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:22px}
+@media(min-width:560px){.row{grid-template-columns:1fr 1fr}.row .wide{grid-column:1/-1}}
+label{display:block;font-weight:500;margin-bottom:6px}
+label output{color:var(--muted);font-weight:400;margin-left:6px}
+select{width:100%;padding:11px 12px;border:1.5px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font:inherit}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.btns{display:flex;gap:10px;flex-wrap:wrap}
+button{font:inherit;font-weight:500;padding:12px 22px;border-radius:999px;border:1.5px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:500}
+button:disabled{opacity:.45;cursor:not-allowed}
+#msg{margin-top:20px;color:var(--muted);font-size:15px;min-height:1.5em}
+</style>
+</head>
+<body>
+<main>
+  <h1>Bol</h1>
+  <p class="sub">Paste or type text, pick an Indian voice, and listen. Works in English and Hindi.</p>
+
+  <label for="text">Your text</label>
+  <textarea id="text">Namaste! Welcome to our store. Please keep your receipt, and have a wonderful day.</textarea>
+  <div class="count" id="count"></div>
+
+  <div class="row">
+    <div class="wide">
+      <label for="voice">Voice</label>
+      <select id="voice"></select>
+    </div>
+    <div>
+      <label for="rate">Speed<output id="rateOut">1.0×</output></label>
+      <input id="rate" type="range" min="0.5" max="1.6" step="0.1" value="1">
+    </div>
+    <div>
+      <label for="pitch">Pitch<output id="pitchOut">1.0</output></label>
+      <input id="pitch" type="range" min="0.5" max="1.5" step="0.1" value="1">
+    </div>
+  </div>
+
+  <div class="btns">
+    <button class="primary" id="play">Speak</button>
+    <button id="pause" disabled>Pause</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
+  <div id="msg" role="status"></div>
+</main>
+
+<script>
+(function(){
+  var synth = window.speechSynthesis;
+  var $ = function(id){return document.getElementById(id)};
+  var text=$('text'), voiceSel=$('voice'), rate=$('rate'), pitch=$('pitch');
+  var play=$('play'), pause=$('pause'), stop=$('stop'), msg=$('msg');
+  var voices=[], paused=false;
+
+  function setMsg(t){msg.textContent=t||''}
+  function updateCount(){ $('count').textContent = text.value.length + ' characters'; }
+  text.addEventListener('input', updateCount); updateCount();
+  rate.addEventListener('input', function(){ $('rateOut').textContent = Number(rate.value).toFixed(1)+'×'; });
+  pitch.addEventListener('input', function(){ $('pitchOut').textContent = Number(pitch.value).toFixed(1); });
+
+  if(!synth){ setMsg('This browser does not support speech. Try Chrome, Edge or Safari.'); play.disabled=true; return; }
+
+  function isIndian(v){ return /^(en|hi|ta|te|bn|mr|gu|kn|ml|pa)[-_]IN$/i.test(v.lang) || /india/i.test(v.name); }
+
+  function loadVoices(){
+    voices = synth.getVoices();
+    if(!voices.length) return;
+    var indian = voices.filter(isIndian);
+    var others = voices.filter(function(v){return !isIndian(v)});
+    voiceSel.innerHTML='';
+    function group(label, list){
+      if(!list.length) return;
+      var g=document.createElement('optgroup'); g.label=label;
+      list.forEach(function(v){
+        var o=document.createElement('option');
+        o.value=voices.indexOf(v); o.textContent=v.name+' ('+v.lang+')';
+        g.appendChild(o);
+      });
+      voiceSel.appendChild(g);
+    }
+    group('Indian voices', indian);
+    group('Other voices', others);
+    var pref = indian.filter(function(v){return /en[-_]IN/i.test(v.lang)})[0] || indian[0];
+    if(pref) voiceSel.value = voices.indexOf(pref);
+    if(!indian.length) setMsg('No Indian voice found on this device. Install an English (India) voice in your system settings, or pick the closest one below.');
+  }
+  loadVoices();
+  synth.onvoiceschanged = loadVoices;
+
+  function reset(){ paused=false; play.disabled=false; pause.disabled=true; stop.disabled=true; pause.textContent='Pause'; }
+
+  play.addEventListener('click', function(){
+    var t = text.value.trim();
+    if(!t){ setMsg('Type or paste some text first.'); return; }
+    synth.cancel();
+    var u = new SpeechSynthesisUtterance(t);
+    var v = voices[Number(voiceSel.value)];
+    if(v){ u.voice=v; u.lang=v.lang; } else { u.lang='en-IN'; }
+    u.rate=Number(rate.value); u.pitch=Number(pitch.value);
+    u.onstart=function(){ play.disabled=true; pause.disabled=false; stop.disabled=false; setMsg('Speaking…'); };
+    u.onend=function(){ reset(); setMsg('Done.'); };
+    u.onerror=function(e){ reset(); if(e.error!=='canceled'&&e.error!=='interrupted') setMsg('Could not play audio ('+e.error+').'); };
+    synth.speak(u);
+  });
+
+  pause.addEventListener('click', function(){
+    if(paused){ synth.resume(); paused=false; pause.textContent='Pause'; setMsg('Speaking…'); }
+    else { synth.pause(); paused=true; pause.textContent='Resume'; setMsg('Paused.'); }
+  });
+
+  stop.addEventListener('click', function(){ synth.cancel(); reset(); setMsg('Stopped.'); });
+  window.addEventListener('beforeunload', function(){ synth.cancel(); });
+})();
+</script>
+</body>
+</html>
